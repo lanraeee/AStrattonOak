@@ -499,6 +499,130 @@
         .messages-container::-webkit-scrollbar-thumb:hover {
             background: #666;
         }
+
+        /* Tabs */
+        .tabs-container {
+            display: flex;
+            gap: 0;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border-color);
+            background: white;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .tab-button {
+            padding: 15px 25px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            color: var(--text-light);
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab-button:hover {
+            color: var(--primary-color);
+            background: var(--bg-light);
+        }
+
+        .tab-button.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Alpaca Section Styles */
+        .alpaca-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .alpaca-card {
+            background: var(--bg-light);
+            border-left: 4px solid var(--primary-color);
+            padding: 20px;
+            border-radius: 4px;
+        }
+
+        .alpaca-card h3 {
+            margin-bottom: 15px;
+            color: var(--primary-color);
+            font-size: 1.1em;
+        }
+
+        .alpaca-info {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: var(--text-dark);
+        }
+
+        .info-value {
+            color: var(--text-light);
+            font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .status-badge.connected {
+            background: #e6f9ed;
+            color: #28a745;
+        }
+
+        .status-badge.disconnected {
+            background: #ffe6e6;
+            color: #dc3545;
+        }
+
+        .status-badge.paper {
+            background: #e7f3ff;
+            color: #0066cc;
+        }
+
+        @media (max-width: 1024px) {
+            .alpaca-section {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -626,29 +750,121 @@
             </div>
 
             <div class="content hidden" id="analysisContent">
-                <div class="progress-container">
-                    <div class="progress-header">
-                        <h3>
-                            <span id="progressTitle">Analysis Progress</span>
-                        </h3>
-                        <div class="progress-status">
-                            <span id="progressPercent">0%</span>
-                            <span id="progressStatus" style="margin-left: 10px; color: var(--primary-color); font-weight: 600;"></span>
+                <!-- Tabs Navigation -->
+                <div class="tabs-container">
+                    <button class="tab-button active" data-tab="analysis-tab" onclick="switchTab(event, 'analysis-tab')">
+                        📊 Analysis
+                    </button>
+                    <button class="tab-button" data-tab="alpaca-tab" onclick="switchTab(event, 'alpaca-tab')">
+                        🦙 Alpaca
+                    </button>
+                </div>
+
+                <!-- Analysis Tab -->
+                <div id="analysis-tab" class="tab-content active">
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <h3>
+                                <span id="progressTitle">Analysis Progress</span>
+                            </h3>
+                            <div class="progress-status">
+                                <span id="progressPercent">0%</span>
+                                <span id="progressStatus" style="margin-left: 10px; color: var(--primary-color); font-weight: 600;"></span>
+                            </div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
                         </div>
                     </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
+
+                    <div>
+                        <h3 style="margin-bottom: 10px; color: var(--text-dark);">Agent Activity</h3>
+                        <div class="messages-container" id="messagesContainer"></div>
+                    </div>
+
+                    <div class="results-section hidden" id="resultsSection">
+                        <h2>Analysis Results</h2>
+                        <div id="resultsContainer"></div>
                     </div>
                 </div>
 
-                <div>
-                    <h3 style="margin-bottom: 10px; color: var(--text-dark);">Agent Activity</h3>
-                    <div class="messages-container" id="messagesContainer"></div>
-                </div>
+                <!-- Alpaca Tab -->
+                <div id="alpaca-tab" class="tab-content">
+                    <div class="alpaca-section">
+                        <!-- Account Status -->
+                        <div class="alpaca-card">
+                            <h3>📊 Account Status</h3>
+                            <div class="alpaca-info">
+                                <div class="info-item">
+                                    <span class="info-label">Status:</span>
+                                    <span class="info-value" id="alpacaStatus">—</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Account Type:</span>
+                                    <span class="info-value" id="alpacaAccountType">—</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Buying Power:</span>
+                                    <span class="info-value" id="alpacaBuyingPower">—</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Portfolio Value:</span>
+                                    <span class="info-value" id="alpacaPortfolioValue">—</span>
+                                </div>
+                                <div id="alpacaConnectionBadge"></div>
+                            </div>
+                        </div>
 
-                <div class="results-section hidden" id="resultsSection">
-                    <h2>Analysis Results</h2>
-                    <div id="resultsContainer"></div>
+                        <!-- Trading Configuration -->
+                        <div class="alpaca-card">
+                            <h3>⚙️ Trading Configuration</h3>
+                            <div class="alpaca-info">
+                                <div class="info-item">
+                                    <span class="info-label">API Key:</span>
+                                    <span class="info-value" id="alpacaApiStatus">Not configured</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Trading Enabled:</span>
+                                    <span class="info-value" id="alpacaTradingEnabled">—</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Data Source:</span>
+                                    <span class="info-value" id="alpacaDataSource">IEX</span>
+                                </div>
+                            </div>
+                            <button class="button button-secondary" style="margin-top: 15px; width: 100%;" onclick="testAlpacaConnection()">
+                                Test Connection
+                            </button>
+                        </div>
+
+                        <!-- Recent Orders -->
+                        <div class="alpaca-card" style="grid-column: 1 / -1;">
+                            <h3>📋 Recent Orders</h3>
+                            <div id="alpacaOrdersList" style="max-height: 300px; overflow-y: auto;">
+                                <div style="color: var(--text-light); padding: 20px; text-align: center;">
+                                    No orders yet
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Market Status -->
+                        <div class="alpaca-card" style="grid-column: 1 / -1;">
+                            <h3>📈 Market Status</h3>
+                            <div class="alpaca-info">
+                                <div class="info-item">
+                                    <span class="info-label">Market:</span>
+                                    <span class="info-value" id="marketStatus">Loading...</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Last Update:</span>
+                                    <span class="info-value" id="marketLastUpdate">—</span>
+                                </div>
+                            </div>
+                            <button class="button button-secondary" style="margin-top: 15px; width: 100%;" onclick="refreshAlpacaData()">
+                                Refresh Data
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1120,6 +1336,172 @@
             appState.ws.onclose = () => {
                 console.log("WebSocket closed");
             };
+        }
+
+        // ====================================================================
+        // Tab Management
+        // ====================================================================
+
+        function switchTab(event, tabName) {
+            // Hide all tab content
+            const tabContents = document.querySelectorAll(".tab-content");
+            tabContents.forEach((tab) => tab.classList.remove("active"));
+
+            // Remove active class from all buttons
+            const tabButtons = document.querySelectorAll(".tab-button");
+            tabButtons.forEach((btn) => btn.classList.remove("active"));
+
+            // Show the selected tab
+            document.getElementById(tabName).classList.add("active");
+            event.target.classList.add("active");
+
+            // Load Alpaca data when switching to Alpaca tab
+            if (tabName === "alpaca-tab") {
+                loadAlpacaData();
+            }
+        }
+
+        // ====================================================================
+        // Alpaca Integration
+        // ====================================================================
+
+        async function loadAlpacaData() {
+            try {
+                const response = await fetch("/api/alpaca/status");
+                if (!response.ok) {
+                    updateAlpacaStatus(null);
+                    return;
+                }
+                const data = await response.json();
+                updateAlpacaStatus(data);
+            } catch (error) {
+                console.error("Failed to load Alpaca data:", error);
+                updateAlpacaStatus(null);
+            }
+        }
+
+        function updateAlpacaStatus(data) {
+            if (!data || data.error) {
+                document.getElementById("alpacaStatus").textContent = "Disconnected";
+                document.getElementById("alpacaAccountType").textContent = "—";
+                document.getElementById("alpacaBuyingPower").textContent = "—";
+                document.getElementById("alpacaPortfolioValue").textContent = "—";
+                document.getElementById("alpacaConnectionBadge").innerHTML =
+                    '<span class="status-badge disconnected">❌ Not Connected</span>';
+                document.getElementById("alpacaTradingEnabled").textContent = "—";
+                return;
+            }
+
+            document.getElementById("alpacaStatus").textContent = data.status || "Connected";
+            document.getElementById("alpacaAccountType").textContent = data.account_type || "—";
+            document.getElementById("alpacaBuyingPower").textContent =
+                data.buying_power ? `$${parseFloat(data.buying_power).toFixed(2)}` : "—";
+            document.getElementById("alpacaPortfolioValue").textContent =
+                data.portfolio_value ? `$${parseFloat(data.portfolio_value).toFixed(2)}` : "—";
+
+            const accountType = (data.account_type || "").toLowerCase();
+            const isPaper = accountType.includes("paper");
+            const badgeClass = isPaper ? "paper" : "connected";
+            const badgeText = isPaper ? "📄 Paper Trading" : "✓ Live Trading";
+            document.getElementById("alpacaConnectionBadge").innerHTML =
+                `<span class="status-badge ${badgeClass}">${badgeText}</span>`;
+
+            document.getElementById("alpacaTradingEnabled").textContent =
+                data.trading_enabled ? "Yes" : "No";
+            document.getElementById("alpacaApiStatus").textContent =
+                data.api_configured ? "✓ Configured" : "Not configured";
+
+            // Load orders
+            loadAlpacaOrders(data.orders || []);
+
+            // Update market status
+            if (data.market_status) {
+                document.getElementById("marketStatus").textContent =
+                    data.market_status.is_open ? "🟢 Open" : "🔴 Closed";
+                document.getElementById("marketLastUpdate").textContent =
+                    new Date().toLocaleTimeString();
+            }
+        }
+
+        function loadAlpacaOrders(orders) {
+            const ordersList = document.getElementById("alpacaOrdersList");
+            ordersList.innerHTML = "";
+
+            if (!orders || orders.length === 0) {
+                ordersList.innerHTML = '<div style="color: var(--text-light); padding: 20px; text-align: center;">No orders yet</div>';
+                return;
+            }
+
+            const table = document.createElement("table");
+            table.style.cssText = "width: 100%; border-collapse: collapse; font-size: 0.9em;";
+
+            const headerRow = table.createTHead().insertRow();
+            headerRow.style.borderBottom = "2px solid var(--border-color)";
+            ["Symbol", "Side", "Qty", "Status", "Time"].forEach((text) => {
+                const th = document.createElement("th");
+                th.textContent = text;
+                th.style.cssText = "text-align: left; padding: 10px; font-weight: 600;";
+                headerRow.appendChild(th);
+            });
+
+            orders.slice(0, 10).forEach((order) => {
+                const row = table.insertRow();
+                row.style.borderBottom = "1px solid var(--border-color)";
+                row.innerHTML = `
+                    <td style="padding: 10px;">${escapeHtml(order.symbol || "—")}</td>
+                    <td style="padding: 10px; font-weight: 600; color: ${order.side === "buy" ? "#28a745" : "#dc3545"};">
+                        ${order.side ? order.side.toUpperCase() : "—"}
+                    </td>
+                    <td style="padding: 10px;">${order.qty || "—"}</td>
+                    <td style="padding: 10px;">
+                        <span style="padding: 2px 8px; border-radius: 3px; background: ${getStatusColor(order.status)};">
+                            ${escapeHtml(order.status || "—")}
+                        </span>
+                    </td>
+                    <td style="padding: 10px; color: var(--text-light); font-size: 0.9em;">
+                        ${order.created_at ? new Date(order.created_at).toLocaleTimeString() : "—"}
+                    </td>
+                `;
+            });
+
+            ordersList.appendChild(table);
+        }
+
+        function getStatusColor(status) {
+            const statusLower = (status || "").toLowerCase();
+            if (statusLower.includes("filled")) return "#e6f9ed";
+            if (statusLower.includes("canceled")) return "#ffe6e6";
+            if (statusLower.includes("pending")) return "#e7f3ff";
+            return "#f5f5f5";
+        }
+
+        async function testAlpacaConnection() {
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = "Testing...";
+
+            try {
+                const response = await fetch("/api/alpaca/test");
+                const data = await response.json();
+
+                if (data.success) {
+                    addMessage("success", "✓ Alpaca connection successful");
+                    await loadAlpacaData();
+                } else {
+                    addMessage("error", `✗ Connection failed: ${data.message}`);
+                }
+            } catch (error) {
+                addMessage("error", `✗ Error testing connection: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        function refreshAlpacaData() {
+            loadAlpacaData();
+            addMessage("info", "Refreshing Alpaca data...");
         }
 
         // ====================================================================

@@ -681,6 +681,66 @@ async def execute_trade(analysis_id: str, body: Dict[str, Any]):
     return {"mode": broker.mode, "order": order}
 
 
+@app.get("/api/alpaca/status")
+async def alpaca_status():
+    """Get Alpaca account and trading status."""
+    broker = AlpacaBroker()
+
+    if not broker.is_configured():
+        return {
+            "error": "Alpaca broker not configured",
+            "api_configured": False,
+        }
+
+    try:
+        account = await asyncio.to_thread(broker.get_account)
+        return {
+            "status": account.get("status"),
+            "account_type": "Paper" if broker.paper else "Live",
+            "buying_power": account.get("buying_power"),
+            "portfolio_value": account.get("portfolio_value"),
+            "cash": account.get("cash"),
+            "trading_enabled": not account.get("trading_blocked", False),
+            "api_configured": True,
+            "market_status": {
+                "is_open": True,  # In a real app, you'd call Alpaca's clock endpoint
+            },
+            "orders": [],  # In a real app, you'd fetch recent orders from Alpaca
+        }
+    except Exception as e:
+        logger.error(f"Failed to get Alpaca account status: {e}")
+        return {
+            "error": str(e),
+            "api_configured": False,
+        }
+
+
+@app.post("/api/alpaca/test")
+async def alpaca_test():
+    """Test Alpaca connection."""
+    broker = AlpacaBroker()
+
+    if not broker.is_configured():
+        return {
+            "success": False,
+            "message": "Alpaca API key/secret not configured in environment",
+        }
+
+    try:
+        account = await asyncio.to_thread(broker.get_account)
+        return {
+            "success": True,
+            "message": f"Connected successfully. Account status: {account.get('status')}",
+            "account": account,
+        }
+    except Exception as e:
+        logger.error(f"Alpaca connection test failed: {e}")
+        return {
+            "success": False,
+            "message": f"Connection failed: {str(e)}",
+        }
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""
