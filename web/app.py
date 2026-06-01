@@ -687,9 +687,18 @@ async def alpaca_status():
     broker = AlpacaBroker()
 
     if not broker.is_configured():
+        logger.warning(
+            "Alpaca not configured. API_KEY set: %s, SECRET_KEY set: %s",
+            bool(os.getenv("ALPACA_API_KEY")),
+            bool(os.getenv("ALPACA_SECRET_KEY")),
+        )
         return {
             "error": "Alpaca broker not configured",
             "api_configured": False,
+            "debug": {
+                "api_key_set": bool(os.getenv("ALPACA_API_KEY")),
+                "secret_key_set": bool(os.getenv("ALPACA_SECRET_KEY")),
+            },
         }
 
     try:
@@ -703,15 +712,19 @@ async def alpaca_status():
             "trading_enabled": not account.get("trading_blocked", False),
             "api_configured": True,
             "market_status": {
-                "is_open": True,  # In a real app, you'd call Alpaca's clock endpoint
+                "is_open": True,
             },
-            "orders": [],  # In a real app, you'd fetch recent orders from Alpaca
+            "orders": [],
         }
     except Exception as e:
         logger.error(f"Failed to get Alpaca account status: {e}")
         return {
             "error": str(e),
             "api_configured": False,
+            "debug": {
+                "exception_type": type(e).__name__,
+                "exception_message": str(e),
+            },
         }
 
 
@@ -721,13 +734,20 @@ async def alpaca_test():
     broker = AlpacaBroker()
 
     if not broker.is_configured():
+        msg = "Alpaca API key/secret not configured in environment"
+        logger.warning(msg)
         return {
             "success": False,
-            "message": "Alpaca API key/secret not configured in environment",
+            "message": msg,
+            "debug": {
+                "api_key_set": bool(os.getenv("ALPACA_API_KEY")),
+                "secret_key_set": bool(os.getenv("ALPACA_SECRET_KEY")),
+            },
         }
 
     try:
         account = await asyncio.to_thread(broker.get_account)
+        logger.info(f"Alpaca connection successful. Account status: {account.get('status')}")
         return {
             "success": True,
             "message": f"Connected successfully. Account status: {account.get('status')}",
@@ -738,6 +758,12 @@ async def alpaca_test():
         return {
             "success": False,
             "message": f"Connection failed: {str(e)}",
+            "debug": {
+                "exception_type": type(e).__name__,
+                "exception_message": str(e),
+                "broker_mode": broker.mode,
+                "base_url": broker.base_url,
+            },
         }
 
 

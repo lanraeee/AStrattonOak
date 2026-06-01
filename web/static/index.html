@@ -1382,12 +1382,24 @@
 
         function updateAlpacaStatus(data) {
             if (!data || data.error) {
+                const error = data?.error || "Unknown error";
+                const apiKeySet = data?.debug?.api_key_set || false;
+                const secretKeySet = data?.debug?.secret_key_set || false;
+
                 document.getElementById("alpacaStatus").textContent = "Disconnected";
                 document.getElementById("alpacaAccountType").textContent = "—";
                 document.getElementById("alpacaBuyingPower").textContent = "—";
                 document.getElementById("alpacaPortfolioValue").textContent = "—";
-                document.getElementById("alpacaConnectionBadge").innerHTML =
-                    '<span class="status-badge disconnected">❌ Not Connected</span>';
+
+                let badgeHTML = '<span class="status-badge disconnected">❌ Not Connected</span>';
+                if (!apiKeySet || !secretKeySet) {
+                    badgeHTML += '<div style="margin-top: 8px; padding: 8px; background: #ffe6e6; border-radius: 3px; font-size: 0.85em; color: #dc3545;">';
+                    badgeHTML += 'Environment variables not configured:<br>';
+                    badgeHTML += `• ALPACA_API_KEY: ${apiKeySet ? '✓' : '✗'}<br>`;
+                    badgeHTML += `• ALPACA_SECRET_KEY: ${secretKeySet ? '✓' : '✗'}<br>`;
+                    badgeHTML += 'Check Railway environment variables.</div>';
+                }
+                document.getElementById("alpacaConnectionBadge").innerHTML = badgeHTML;
                 document.getElementById("alpacaTradingEnabled").textContent = "—";
                 return;
             }
