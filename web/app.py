@@ -681,6 +681,75 @@ async def execute_trade(analysis_id: str, body: Dict[str, Any]):
     return {"mode": broker.mode, "order": order}
 
 
+@app.get("/api/alpaca/debug")
+async def alpaca_debug():
+    """Comprehensive diagnostics for Alpaca configuration and connectivity."""
+    broker = AlpacaBroker()
+
+    # Check environment variables
+    api_key = os.getenv("ALPACA_API_KEY", "").strip()
+    secret_key = os.getenv("ALPACA_SECRET_KEY", "").strip()
+    paper_mode = os.getenv("ALPACA_PAPER", "").strip()
+
+    debug_info = {
+        "env_vars": {
+            "ALPACA_API_KEY": {
+                "set": bool(api_key),
+                "length": len(api_key) if api_key else 0,
+                "first_chars": api_key[:4] + "..." if len(api_key) > 4 else "***",
+            },
+            "ALPACA_SECRET_KEY": {
+                "set": bool(secret_key),
+                "length": len(secret_key) if secret_key else 0,
+                "first_chars": secret_key[:4] + "..." if len(secret_key) > 4 else "***",
+            },
+            "ALPACA_PAPER": {
+                "set": bool(paper_mode),
+                "value": paper_mode if paper_mode else "not set",
+            },
+        },
+        "broker_state": {
+            "is_configured": broker.is_configured(),
+            "mode": broker.mode,
+            "base_url": broker.base_url,
+        },
+    }
+
+    # Try to connect and get detailed error info
+    if broker.is_configured():
+        try:
+            import requests
+            headers = broker._headers()
+            response = requests.get(
+                f"{broker.base_url}/v2/account",
+                headers=headers,
+                timeout=10,
+            )
+            debug_info["connection_test"] = {
+                "success": response.status_code == 200,
+                "status_code": response.status_code,
+                "response_headers": dict(response.headers),
+            }
+            if response.status_code != 200:
+                try:
+                    debug_info["connection_test"]["error_body"] = response.json()
+                except:
+                    debug_info["connection_test"]["error_text"] = response.text[:500]
+        except Exception as e:
+            debug_info["connection_test"] = {
+                "success": False,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            }
+    else:
+        debug_info["connection_test"] = {
+            "success": False,
+            "reason": "Broker not configured (missing API key or secret)",
+        }
+
+    return debug_info
+
+
 @app.get("/api/alpaca/status")
 async def alpaca_status():
     """Get Alpaca account and trading status."""
@@ -718,12 +787,13 @@ async def alpaca_status():
         }
     except Exception as e:
         logger.error(f"Failed to get Alpaca account status: {e}")
+        error_str = str(e)
         return {
-            "error": str(e),
+            "error": error_str,
             "api_configured": False,
             "debug": {
                 "exception_type": type(e).__name__,
-                "exception_message": str(e),
+                "exception_message": error_str[:200],
             },
         }
 
@@ -755,12 +825,13 @@ async def alpaca_test():
         }
     except Exception as e:
         logger.error(f"Alpaca connection test failed: {e}")
+        error_str = str(e)
         return {
             "success": False,
-            "message": f"Connection failed: {str(e)}",
+            "message": f"Connection failed: {error_str[:200]}",
             "debug": {
                 "exception_type": type(e).__name__,
-                "exception_message": str(e),
+                "exception_message": error_str[:200],
                 "broker_mode": broker.mode,
                 "base_url": broker.base_url,
             },
