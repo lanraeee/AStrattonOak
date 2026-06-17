@@ -23,8 +23,9 @@ PROVIDER_API_KEY_ENV: dict[str, Optional[str]] = {
     "deepseek":   "DEEPSEEK_API_KEY",
     # Dual-region providers each carry their own account; keys are not
     # interchangeable between the international and China endpoints.
-    "qwen":       "DASHSCOPE_API_KEY",
-    "qwen-cn":    "DASHSCOPE_CN_API_KEY",
+    # QWEN uses DashScope API endpoint for both regions.
+    "qwen":       "QWEN_API_KEY",        # International endpoint (or DASHSCOPE_API_KEY for backward compat)
+    "qwen-cn":    "QWEN_CN_API_KEY",     # China endpoint (or DASHSCOPE_CN_API_KEY for backward compat)
     "glm":        "ZHIPU_API_KEY",
     "glm-cn":     "ZHIPU_CN_API_KEY",
     "minimax":    "MINIMAX_API_KEY",
