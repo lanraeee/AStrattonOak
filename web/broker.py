@@ -7,9 +7,11 @@ proposes an order and only places it after explicit user confirmation.
 Configuration (environment variables):
     ALPACA_API_KEY      - Alpaca API key id (required to enable trading)
     ALPACA_SECRET_KEY   - Alpaca API secret (required)
-    ALPACA_PAPER        - "true" routes to the paper endpoint; anything else
-                          (or unset) uses the LIVE endpoint. Keys must match
-                          the chosen endpoint.
+    ALPACA_PAPER        - "false"/"0"/"no"/"off" routes to the LIVE endpoint;
+                          anything else (or unset) uses the PAPER endpoint.
+                          Live trading is opt-in: you must explicitly set
+                          ALPACA_PAPER=false to place real-money orders. Keys
+                          must match the chosen endpoint.
 """
 
 from __future__ import annotations
@@ -43,8 +45,10 @@ class AlpacaBroker:
     def __init__(self):
         self.api_key = os.getenv("ALPACA_API_KEY", "").strip()
         self.secret_key = os.getenv("ALPACA_SECRET_KEY", "").strip()
-        self.paper = os.getenv("ALPACA_PAPER", "false").strip().lower() in (
-            "true", "1", "yes", "on",
+        # Paper trading is the safe default. Live trading must be explicitly
+        # opted into by setting ALPACA_PAPER to a falsy value.
+        self.paper = os.getenv("ALPACA_PAPER", "true").strip().lower() not in (
+            "false", "0", "no", "off",
         )
         self.base_url = _PAPER_URL if self.paper else _LIVE_URL
 
