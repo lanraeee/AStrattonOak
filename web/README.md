@@ -55,9 +55,12 @@ docker run -e OPENAI_API_KEY=sk-... -p 8000:8000 tradingagents-web
 # Visit http://localhost:8000
 ```
 
-### Railway.com Deployment
+### Deployment
 
-See [DEPLOYMENT_RAILWAY.md](../DEPLOYMENT_RAILWAY.md) for complete instructions.
+The app is a standard FastAPI/uvicorn service (`web/app.py`) and a `Dockerfile`
+is provided; deploy it as you would any FastAPI app. Set the relevant API-key
+environment variables (and, for any deployment that can place orders, the
+security variables below) on your host.
 
 ## Directory Structure
 
@@ -168,7 +171,24 @@ TRADINGAGENTS_TEMPERATURE=0.7
 TRADINGAGENTS_MAX_DEBATE_ROUNDS=2
 ```
 
-See [DEPLOYMENT_RAILWAY.md](../DEPLOYMENT_RAILWAY.md) for complete environment variable reference.
+Security-related variables for deployments:
+
+```bash
+# Require this token (X-API-Token header or "Authorization: Bearer <token>")
+# on every /api route. Strongly recommended once broker trading is enabled.
+TRADINGAGENTS_API_TOKEN=<random-secret>
+
+# Explicit CORS allowlist (comma-separated). When set, credentialed CORS is
+# enabled for exactly these origins. When unset, CORS is permissive but
+# credential-less (safe for same-origin / token-in-header use).
+TRADINGAGENTS_CORS_ORIGINS=https://app.example.com
+
+# Alpaca broker. Paper trading is the DEFAULT; live trading is opt-in and
+# requires ALPACA_PAPER=false explicitly.
+ALPACA_API_KEY=...
+ALPACA_SECRET_KEY=...
+ALPACA_PAPER=true
+```
 
 ## Frontend Features
 
@@ -270,6 +290,5 @@ Same as main TradingAgents repository.
 
 ## Support
 
-- GitHub Issues: https://github.com/fawazzzbello/strattonoak/issues
-- Deployment Help: See [DEPLOYMENT_RAILWAY.md](../DEPLOYMENT_RAILWAY.md)
+- GitHub Issues: file against the upstream TradingAgents repository
 - Documentation: See main [README.md](../README.md)

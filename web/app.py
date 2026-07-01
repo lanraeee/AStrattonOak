@@ -7,7 +7,17 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+import secrets
+
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    BackgroundTasks,
+    Depends,
+    Header,
+)
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -35,6 +45,39 @@ active_analyses: Dict[str, Dict[str, Any]] = {}
 # evicted first once this is exceeded.
 MAX_ANALYSES = int(os.getenv("TRADINGAGENTS_WEB_MAX_ANALYSES", "100"))
 
+# Upper bound on concurrently in-flight (queued/running) analyses. Each run is
+# a heavy multi-agent job; this prevents a flood of requests from exhausting
+# memory or the background-task thread pool. New starts past this are rejected
+# with 429 rather than evicting a live analysis.
+MAX_CONCURRENT_ANALYSES = int(os.getenv("TRADINGAGENTS_WEB_MAX_CONCURRENT", "5"))
+
+# Optional shared secret guarding the JSON API. When TRADINGAGENTS_API_TOKEN is
+# set, every /api route requires a matching X-API-Token header (or
+# "Authorization: Bearer <token>"). This is the minimum bar before exposing the
+# live-money execute endpoint to anything other than localhost.
+_API_TOKEN = os.getenv("TRADINGAGENTS_API_TOKEN", "").strip()
+
+
+def require_api_token(
+    x_api_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """FastAPI dependency enforcing the shared API token when one is configured.
+
+    No-op when TRADINGAGENTS_API_TOKEN is unset so local/dev use is unaffected,
+    but the moment a token is configured (recommended for any deployment that
+    can place real orders) callers must present it. Comparison is constant-time.
+    """
+    if not _API_TOKEN:
+        return
+    presented = x_api_token
+    if not presented and authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer":
+            presented = value.strip()
+    if not presented or not secrets.compare_digest(presented, _API_TOKEN):
+        raise HTTPException(status_code=401, detail="Missing or invalid API token.")
+
 # Sensible default models per provider, used when the chosen provider does
 # not match the configured models (e.g. provider=anthropic but the default
 # config still points deep_think_llm at an OpenAI "gpt-5.5"). Keeps the
@@ -49,32 +92,52 @@ PROVIDER_DEFAULT_MODELS: Dict[str, Dict[str, str]] = {
     "qwen-cn":    {"deep": "qwen3.7-max",        "quick": "qwen3.6-flash"},
     "glm":        {"deep": "glm-5.1",            "quick": "glm-5-turbo"},
     "glm-cn":     {"deep": "glm-5.1",            "quick": "glm-5-turbo"},
+    "minimax":    {"deep": "MiniMax-M2.7",       "quick": "MiniMax-M2.7-highspeed"},
+    "minimax-cn": {"deep": "MiniMax-M2.7",       "quick": "MiniMax-M2.7-highspeed"},
 }
 
 
-def _first_configured_provider() -> Optional[str]:
-    """Return the first provider (in preference order) that has an API key set."""
+def _first_configured_provider(require_defaults: bool = False) -> Optional[str]:
+    """Return the first provider (in preference order) that has an API key set.
+
+    When ``require_defaults`` is set, only providers with catalog defaults in
+    ``PROVIDER_DEFAULT_MODELS`` are considered. This is used during auto-select
+    so we never silently pair a freshly-chosen provider with the previously
+    requested provider's model name (a provider/model mismatch).
+    """
     preference = [
         "openai", "anthropic", "google", "xai", "deepseek",
         "qwen", "qwen-cn", "glm", "glm-cn", "minimax", "minimax-cn",
         "openrouter",
     ]
     for provider in preference:
+        if require_defaults and provider not in PROVIDER_DEFAULT_MODELS:
+            continue
         env_var = get_api_key_env(provider)
         if env_var and os.environ.get(env_var):
             return provider
     return None
 
 
-def _resolve_provider_models(provider: str, config: Dict[str, Any]) -> None:
+def _resolve_provider_models(
+    provider: str, config: Dict[str, Any], force: bool = False
+) -> None:
     """Ensure config's models match the chosen provider, in-place.
 
     If the user left the model as the default (or it belongs to a different
     provider family), substitute that provider's recommended models so the
-    correct client and API key are used.
+    correct client and API key are used. When ``force`` is set (e.g. after an
+    auto-select away from the requested provider) the provider's defaults are
+    applied unconditionally, so a stale model name cannot survive a provider
+    switch.
     """
     defaults = PROVIDER_DEFAULT_MODELS.get(provider)
     if not defaults:
+        return
+
+    if force:
+        config["deep_think_llm"] = defaults["deep"]
+        config["quick_think_llm"] = defaults["quick"]
         return
 
     deep = config.get("deep_think_llm") or DEFAULT_CONFIG.get("deep_think_llm", "")
@@ -84,7 +147,7 @@ def _resolve_provider_models(provider: str, config: Dict[str, Any]) -> None:
     family_prefixes = {
         "openai": "gpt", "anthropic": "claude", "google": "gemini",
         "xai": "grok", "deepseek": "deepseek", "qwen": "qwen", "qwen-cn": "qwen",
-        "glm": "glm", "glm-cn": "glm",
+        "glm": "glm", "glm-cn": "glm", "minimax": "minimax", "minimax-cn": "minimax",
     }
     prefix = family_prefixes.get(provider, "")
 
@@ -95,12 +158,14 @@ def _resolve_provider_models(provider: str, config: Dict[str, Any]) -> None:
 
 
 def _evict_old_analyses() -> None:
-    """Bound the in-memory store, evicting oldest terminal analyses first.
+    """Bound the in-memory store, evicting oldest *terminal* analyses only.
 
     ``active_analyses`` preserves insertion order, so the earliest-created
-    entries appear first. Completed/failed analyses are dropped before any
-    still-running ones; if the cap is still exceeded (e.g. many concurrent
-    runs) the oldest entries are removed regardless.
+    entries appear first. Only completed/failed analyses are ever dropped — a
+    still-running (queued/running) analysis is never evicted, even if that
+    leaves the store above ``MAX_ANALYSES`` (concurrent in-flight runs are
+    bounded separately by ``_running_count``/``MAX_CONCURRENT_ANALYSES`` at
+    start time).
     """
     if len(active_analyses) < MAX_ANALYSES:
         return
@@ -112,9 +177,13 @@ def _evict_old_analyses() -> None:
     while len(active_analyses) >= MAX_ANALYSES and terminal:
         active_analyses.pop(terminal.pop(0), None)
 
-    while len(active_analyses) >= MAX_ANALYSES:
-        oldest = next(iter(active_analyses))
-        active_analyses.pop(oldest, None)
+
+def _running_count() -> int:
+    """Number of analyses that are queued or actively running."""
+    return sum(
+        1 for a in active_analyses.values()
+        if a["status"] in ("queued", "running")
+    )
 
 
 def _bump_progress(analysis_id: str, step: int = 2, ceiling: int = 85) -> None:
@@ -200,14 +269,35 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware.
+#
+# Origins come from TRADINGAGENTS_CORS_ORIGINS (comma-separated). We never pair
+# a wildcard with credentials: the CORS spec forbids it, and credentialed
+# wildcard CORS would let any web page in the user's browser drive the
+# live-money execute endpoint. When no explicit allowlist is configured we
+# fall back to a permissive, *credential-less* policy (safe for a same-origin
+# SPA / token-in-header auth), and only enable credentials for an explicit list.
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("TRADINGAGENTS_CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # ============================================================================
@@ -221,7 +311,7 @@ async def index():
     return FileResponse(_INDEX_HTML, media_type="text/html")
 
 
-@app.get("/api/config")
+@app.get("/api/config", dependencies=[Depends(require_api_token)])
 async def get_config():
     """Get current configuration and available options."""
     providers = {
@@ -297,7 +387,7 @@ async def get_config():
     }
 
 
-@app.post("/api/analyze/start")
+@app.post("/api/analyze/start", dependencies=[Depends(require_api_token)])
 async def start_analysis(background_tasks: BackgroundTasks, request_data: Dict[str, Any]):
     """Start a new analysis."""
     try:
@@ -316,15 +406,20 @@ async def start_analysis(background_tasks: BackgroundTasks, request_data: Dict[s
         # else auto-pick the first provider that has an API key configured.
         provider = config.get("llm_provider") or DEFAULT_CONFIG.get("llm_provider", "openai")
         env_var = get_api_key_env(provider)
+        auto_selected = False
         if env_var is not None and not os.environ.get(env_var):
-            # The requested provider has no key. Try to auto-select one that does.
-            available = _first_configured_provider()
+            # The requested provider has no key. Auto-select one that does AND
+            # has catalog defaults, so we can realign the model too — otherwise
+            # we'd keep the requested provider's model name against a different
+            # provider (a provider/model mismatch).
+            available = _first_configured_provider(require_defaults=True)
             if available:
                 logger.info(
                     f"Provider '{provider}' has no key; auto-selecting '{available}'"
                 )
                 provider = available
                 env_var = get_api_key_env(provider)
+                auto_selected = True
             else:
                 raise HTTPException(
                     status_code=400,
@@ -332,13 +427,26 @@ async def start_analysis(background_tasks: BackgroundTasks, request_data: Dict[s
                         f"No API key configured for provider '{provider}'. "
                         f"Set the {env_var} environment variable in your Railway "
                         f"service (Variables tab) and redeploy. No other provider "
-                        f"has a key configured either."
+                        f"with known model defaults has a key configured either."
                     ),
                 )
 
-        # Lock in the resolved provider and keep its models in sync.
+        # Lock in the resolved provider and keep its models in sync. On an
+        # auto-select we force the realignment so the inherited model name from
+        # the originally requested provider cannot leak through.
         config["llm_provider"] = provider
-        _resolve_provider_models(provider, config)
+        _resolve_provider_models(provider, config, force=auto_selected)
+
+        # Reject new work when too many analyses are already in flight, rather
+        # than evicting a live run to make room.
+        if _running_count() >= MAX_CONCURRENT_ANALYSES:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Too many analyses in progress "
+                    f"({MAX_CONCURRENT_ANALYSES} max). Please retry shortly."
+                ),
+            )
 
         # Create analysis ID
         analysis_id = f"{ticker}_{int(datetime.now().timestamp())}"
@@ -359,6 +467,7 @@ async def start_analysis(background_tasks: BackgroundTasks, request_data: Dict[s
             "started_at": datetime.now().isoformat(),
             "proposed_order": None,
             "order_result": None,
+            "confirm_token": None,
         }
 
         # Run analysis in background
@@ -366,12 +475,16 @@ async def start_analysis(background_tasks: BackgroundTasks, request_data: Dict[s
 
         return {"analysis_id": analysis_id, "status": "queued"}
 
+    except HTTPException:
+        # Intended client errors (400 validation, 401 auth, 429 backpressure)
+        # must propagate with their own status, not be masked as a 500.
+        raise
     except Exception as e:
         logger.error(f"Error starting analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/analyze/{analysis_id}")
+@app.get("/api/analyze/{analysis_id}", dependencies=[Depends(require_api_token)])
 async def get_analysis_status(analysis_id: str):
     """Get analysis status and progress."""
     if analysis_id not in active_analyses:
@@ -390,10 +503,11 @@ async def get_analysis_status(analysis_id: str):
         "started_at": analysis["started_at"],
         "proposed_order": analysis.get("proposed_order"),
         "order_result": analysis.get("order_result"),
+        "confirm_token": analysis.get("confirm_token"),
     }
 
 
-@app.get("/api/analyze/{analysis_id}/messages")
+@app.get("/api/analyze/{analysis_id}/messages", dependencies=[Depends(require_api_token)])
 async def get_analysis_messages(analysis_id: str, skip: int = 0, limit: int = 50):
     """Get analysis messages."""
     if analysis_id not in active_analyses:
@@ -461,6 +575,7 @@ async def websocket_analyze(websocket: WebSocket, analysis_id: str):
                 "error": analysis["error"],
                 "proposed_order": analysis.get("proposed_order"),
                 "order_result": analysis.get("order_result"),
+                "confirm_token": analysis.get("confirm_token"),
             },
         })
 
@@ -552,6 +667,10 @@ def run_analysis_task(
                 "rating": rating,
                 "mode": broker.mode,
             }
+            # Confirmation token: execution must echo this back, so a stray or
+            # forged POST that hasn't seen the proposed order cannot trigger a
+            # trade. Surfaced only to authenticated status readers.
+            analysis["confirm_token"] = secrets.token_urlsafe(32)
             add_message(
                 analysis_id,
                 "info",
@@ -614,7 +733,7 @@ def add_message(analysis_id: str, level: str, content: str):
 # ============================================================================
 
 
-@app.get("/api/broker/status")
+@app.get("/api/broker/status", dependencies=[Depends(require_api_token)])
 async def broker_status():
     """Report whether Alpaca is configured and, if so, the account snapshot."""
     broker = AlpacaBroker()
@@ -628,11 +747,15 @@ async def broker_status():
         return {"configured": True, "mode": broker.mode, "account": None, "error": str(e)}
 
 
-@app.post("/api/analyze/{analysis_id}/execute")
+@app.post("/api/analyze/{analysis_id}/execute", dependencies=[Depends(require_api_token)])
 async def execute_trade(analysis_id: str, body: Dict[str, Any]):
     """Place the proposed order for a completed analysis (user-confirmed).
 
-    Body: {"notional": <usd>} or {"qty": <shares>} — exactly one.
+    Body: {"confirm_token": <token>, "notional": <usd>} or
+          {"confirm_token": <token>, "qty": <shares>} — exactly one of
+    notional/qty. The confirm_token is issued with the proposed order (see the
+    status / websocket-complete payloads) and must be echoed back so a request
+    that never saw the proposal cannot place a real order.
     """
     if analysis_id not in active_analyses:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -646,6 +769,16 @@ async def execute_trade(analysis_id: str, body: Dict[str, Any]):
         )
     if analysis.get("order_result"):
         raise HTTPException(status_code=409, detail="Order already executed for this analysis.")
+
+    expected_token = analysis.get("confirm_token")
+    presented_token = (body.get("confirm_token") or "").strip() if isinstance(body, dict) else ""
+    if not expected_token or not presented_token or not secrets.compare_digest(
+        presented_token, expected_token
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Missing or invalid confirmation token for this order.",
+        )
 
     broker = AlpacaBroker()
     if not broker.is_configured():

@@ -664,6 +664,7 @@
             currentAnalysisId: null,
             ws: null,
             messageCount: 0,
+            confirmToken: null,
         };
 
         // ====================================================================
@@ -1044,7 +1045,7 @@
                 const resp = await fetch(`/api/analyze/${appState.currentAnalysisId}/execute`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ notional }),
+                    body: JSON.stringify({ notional, confirm_token: appState.confirmToken }),
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
@@ -1098,6 +1099,9 @@
 
                     case "complete":
                         appState.ws.close();
+                        // Capture the per-order confirmation token; the execute
+                        // endpoint requires it to be echoed back.
+                        appState.confirmToken = data.data.confirm_token || null;
                         updateProgress(
                             data.data.status === "completed" ? 100 : 0,
                             data.data.status
