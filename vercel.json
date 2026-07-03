@@ -7,7 +7,6 @@
   },
   "functions": {
     "api/**/*.py": {
-      "runtime": "python@3.12",
       "memory": 3008,
       "maxDuration": 900
     }
