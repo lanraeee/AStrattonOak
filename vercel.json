@@ -1,14 +1,7 @@
 {
-  "buildCommand": "pip install -q -e .",
   "runtime": "python@3.12",
   "env": {
     "PYTHONUNBUFFERED": "1",
     "PYTHONDONTWRITEBYTECODE": "1"
-  },
-  "functions": {
-    "api/**/*.py": {
-      "memory": 3008,
-      "maxDuration": 900
-    }
   }
 }
