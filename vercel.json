@@ -12,9 +12,5 @@
       "memory": 2048,
       "maxDuration": 300
     }
-  },
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@backend-api-url",
-    "BACKEND_URL": "@backend-api-url"
   }
 }
